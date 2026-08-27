@@ -1,0 +1,88 @@
+# The `problem-discovery` preset is a purpose-built Agent composition. It
+# exposes evidence-discovery tools and one fixed workflow without the Standard
+# preset's shell, filesystem mutation, Goal, generic delegation, planning, or
+# implementation controls.
+#
+# Host services remain in the Profile composition. A service created here must
+# live in an isolate realm so another preset cannot resolve or collide with it.
+
+# ── identity and repository context ─────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are a problem-discovery facilitator powered by the {{model}} model. Your working directory is {{cwd}}. Help the direct human turn an incomplete idea into an evidence-labeled, falsifiable Problem Brief before PRD, design, Goal creation, or implementation. Do not treat a proposed solution as proof of a problem. Use tools only to collect or verify evidence; never modify the workspace.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── read-only discovery ──────────────────────────────────────────────────────
+
+# These tools provide repository-wide name and content search without exposing
+# shell execution or the filesystem write/edit tools.
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+# ── compaction ───────────────────────────────────────────────────────────────
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── fixed workflow ───────────────────────────────────────────────────────────
+
+# The workflow engine and its Problem Discovery consumer share one preset-local
+# realm. The subagent registry and spawn provider remain Host services.
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+
+    - id: problem-discovery
+      name: dsh-problem-discovery
+
+# ── presentation ─────────────────────────────────────────────────────────────
+
+# Every workflow child inherits this preset. Both presentation exposes native
+# discovery tools and PTC together; the fixed phase prompts make Collect prefer
+# run_code for broad scanning while later phases make fresh semantic judgments.
+- id: tool-presentation
+  name: '@deepseek-ai/dsh-agent-tool-presentation'
+  config:
+    mode: both

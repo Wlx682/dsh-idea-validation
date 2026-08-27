@@ -1,0 +1,9 @@
+.DS_Store
+lib/
+src/
+tests/
+tsconfig.json
+README.i18n.yaml
+README.zh.md
+node_modules/
+*.tgz

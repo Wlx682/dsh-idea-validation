@@ -1,0 +1,3 @@
+name: 问题发现模式
+description: 专用问题发现预设：仅保留搜索、Web、提问和固定三阶段工作流，以 both 同时提供原生工具与 PTC。
+order: 5
