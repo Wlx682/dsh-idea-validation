@@ -575,7 +575,8 @@ function assertIdeaDialogueAdvance(previousPayload, nextPayload) {
 				if (!RESOLVED_LAYER_STATUSES.has(nextLayer.status)) throw new Error("the answered ideaDialogue focus layer must become confirmed or not-applicable");
 				continue;
 			}
-			if (JSON.stringify(nextLayer) !== JSON.stringify(previousLayer)) throw new Error("a dialogue step must not silently change any layer outside the current focus");
+			if (RESOLVED_LAYER_STATUSES.has(previousLayer.status) && JSON.stringify(nextLayer) !== JSON.stringify(previousLayer)) throw new Error("a dialogue step must preserve every previously resolved layer outside the current focus");
+			if (!RESOLVED_LAYER_STATUSES.has(previousLayer.status) && RESOLVED_LAYER_STATUSES.has(nextLayer.status)) throw new Error("a dialogue step must not silently resolve a layer outside the current focus");
 		}
 		return;
 	}
@@ -584,6 +585,30 @@ function assertIdeaDialogueAdvance(previousPayload, nextPayload) {
 		return JSON.stringify(nextLayer) !== JSON.stringify(previousLayer);
 	});
 	if (reopened.length !== 1 || isIdeaDialogueComplete(nextPayload)) throw new Error("revising a completed dialogue must reopen exactly one layer");
+}
+
+function normalizeIdeaDialogueAdvance(previousPayload, candidatePayload) {
+	if (!hasIdeaDialogue(previousPayload) || asRecord(candidatePayload) === undefined) return candidatePayload;
+	const candidateDialogue = asRecord(candidatePayload.ideaDialogue);
+	if (candidateDialogue === undefined || !Array.isArray(candidateDialogue.layers)) return candidatePayload;
+	const normalized = structuredClone(candidatePayload);
+	const previous = previousPayload.ideaDialogue;
+	const next = normalized.ideaDialogue;
+	const focusId = isIdeaDialogueComplete(previousPayload) ? undefined : previous.nextFocus.layerId;
+	for (const previousLayer of previous.layers) {
+		if (previousLayer.id === focusId) continue;
+		const index = next.layers.findIndex((layer) => asRecord(layer)?.id === previousLayer.id);
+		if (index < 0) continue;
+		const nextLayer = next.layers[index];
+		const preserveResolvedHistory = RESOLVED_LAYER_STATUSES.has(previousLayer.status);
+		const preventSilentResolution = !RESOLVED_LAYER_STATUSES.has(previousLayer.status) && RESOLVED_LAYER_STATUSES.has(nextLayer.status);
+		if (preserveResolvedHistory || preventSilentResolution) next.layers[index] = structuredClone(previousLayer);
+	}
+	if (asRecord(next.progress) !== undefined) {
+		next.progress.resolved = next.layers.filter((layer) => RESOLVED_LAYER_STATUSES.has(layer.status)).length;
+		next.progress.total = DIALOGUE_LAYER_IDS.length;
+	}
+	return normalized;
 }
 
 function assertWorkspaceEvidence(evidence, authorizedSources) {
@@ -974,7 +999,7 @@ function nextStage(stage, decision) {
 
 function stageInstructions(stage) {
 	return {
-		clarify: "Do not search the web or workspace and do not call any human-interaction tool. Build or update ideaDialogue as a layered, intentionally incomplete conversation draft; do not write a complete essay for blanket approval. Always use exactly these six layer ids: purpose-value, user-scenario, scope-boundary, core-mechanism, constraints-resources, success-criteria. Mark each layer confirmed only when directly stated by the human, inferred when it is a useful but unconfirmed hypothesis, missing when absent, conflict when two interpretations disagree, or not-applicable only after the human excludes it. On the first round, preserve the useful structure but leave at least two layers unresolved. On a revise round, absorb only the latest card answer into the focused layer, append the actual question/answer to clarifications, increment round, describe the change in lastChange, and never silently overwrite any other confirmed layer. Select exactly one nextFocus: conflicts before missing layers, missing layers before inferred layers. Its question must ask one decision variable and its 2-4 options must directly answer that variable; custom input remains the correction path. When every layer is confirmed or not-applicable, set nextFocus to none with empty fields and options. If the human reopens a completed layer, make that one layer unresolved and focus it. Set ideaExpansion to its empty compatibility shape, openQuestions and clarificationQuestions to empty arrays, and evidence to an empty array. Inferred content is never fact or evidence. Keep unused downstream fields structurally present.",
+		clarify: "Do not search the web or workspace and do not call any human-interaction tool. Build or update ideaDialogue as a layered, intentionally incomplete conversation draft; do not write a complete essay for blanket approval. Always use exactly these six layer ids: purpose-value, user-scenario, scope-boundary, core-mechanism, constraints-resources, success-criteria. Mark each layer confirmed only when directly stated by the human, inferred when it is a useful but unconfirmed hypothesis, missing when absent, conflict when two interpretations disagree, or not-applicable only after the human excludes it. On the first round, preserve the useful structure but leave at least two layers unresolved. On a revise round, absorb only the latest card answer into the focused layer, append the actual question/answer to clarifications, increment round, describe the change in lastChange, and never silently overwrite any other confirmed layer. Other unresolved layers may be reworded or expose a new hypothesis or conflict as context improves, but they must remain unresolved until focused. Select exactly one nextFocus: conflicts before missing layers, missing layers before inferred layers. Its question must ask one decision variable and its 2-4 options must directly answer that variable; custom input remains the correction path. When every layer is confirmed or not-applicable, set nextFocus to none with empty fields and options. If the human reopens a completed layer, make that one layer unresolved and focus it. Set ideaExpansion to its empty compatibility shape, openQuestions and clarificationQuestions to empty arrays, and evidence to an empty array. Inferred content is never fact or evidence. Keep unused downstream fields structurally present.",
 		frame: "Do not use tools. Use the completed ideaDialogue and its direct-human clarifications to define the problem. Preserve ideaDialogue as conversation history and ideaExpansion only as legacy history when present. Separate observed pain from proposed solutions and never promote an inferred layer to evidence. Define the outcome and decision, list 1-5 falsifiable assumptions, select exactly one riskiest assumption, and leave openQuestions empty.",
 		"evidence-plan": "Do not collect evidence yet. Design one bounded plan for the riskiest assumption. Name 1-5 specific sources or methods, plus pass and fail signals. Do not broaden into general industry research.",
 		"evidence-result": "Execute only the approved evidence plan. Web evidence is background, never proof about the user's organization. Workspace evidence may use only authorizedSources. Record 1-8 narrow claims with source type, locator, verification, direction, and relevance. State uncertainty honestly.",
@@ -1041,7 +1066,10 @@ async function runStage(ctx, parent, signal, stage, prompt, authorizedSources, p
 			const envelope = asRecord(settled.value);
 			previousValue = envelope?.payload;
 			try {
-				const payload = readPayload(previousValue, stage, authorizedSources);
+				const candidate = stage === "clarify" && previousPayload !== undefined
+					? normalizeIdeaDialogueAdvance(previousPayload, previousValue)
+					: previousValue;
+				const payload = readPayload(candidate, stage, authorizedSources);
 				if (stage === "clarify" && previousPayload !== undefined) assertIdeaDialogueAdvance(previousPayload, payload);
 				return { payload, runIds, agentsStarted };
 			} catch (error) {

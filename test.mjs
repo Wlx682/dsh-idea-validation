@@ -447,17 +447,26 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   const test = setup()
   test.enqueue(payloadFor('clarify'))
   const started = await test.tool.execute({ action: 'start', request: '保护逐轮已确认内容' }, { agent: test.parent, signal: test.signal })
-  const invalid = dialoguePayload(2)
-  invalid.ideaDialogue.layers.find(layer => layer.id === 'scope-boundary').content = '偷偷扩大到完整开发执行'
-  test.enqueue(invalid)
-  test.enqueue(dialoguePayload(2))
-  const repaired = await test.tool.execute({
+  const evolved = dialoguePayload(2)
+  evolved.ideaDialogue.layers.find(layer => layer.id === 'purpose-value').content = '模型擅自改写已确认目标'
+  evolved.ideaDialogue.layers.find(layer => layer.id === 'scope-boundary').content = '结合新角色信息，推测只覆盖问题框架形成'
+  Object.assign(evolved.ideaDialogue.layers.find(layer => layer.id === 'success-criteria'), {
+    content: '模型顺手给出的成功标准', status: 'confirmed', note: '并非当前焦点的用户回答',
+  })
+  evolved.ideaDialogue.progress.resolved = 3
+  test.enqueue(evolved)
+  const advanced = await test.tool.execute({
     action: 'continue', caseId: started.result.caseId, expectedRevision: 1, decision: 'revise',
     humanResponse: JSON.stringify([{ id: 'idea-dialogue-user', selected: ['研发负责人'] }]),
   }, { agent: test.parent, signal: test.signal })
-  assert.equal(repaired.agentsStarted, 2)
-  assert.equal(repaired.result.payload.ideaDialogue.round, 2)
-  assert.match(test.starts[2].args.prompt, /must not silently change any layer outside the current focus/)
+  assert.equal(advanced.agentsStarted, 1)
+  assert.equal(test.starts.length, 2, 'history projection must not consume a repair attempt')
+  const layers = Object.fromEntries(advanced.result.payload.ideaDialogue.layers.map(layer => [layer.id, layer]))
+  assert.equal(layers['purpose-value'].content, '减少目标偏离与无效返工')
+  assert.equal(layers['scope-boundary'].content, '结合新角色信息，推测只覆盖问题框架形成')
+  assert.equal(layers['scope-boundary'].status, 'inferred')
+  assert.equal(layers['success-criteria'].status, 'missing')
+  assert.equal(layers['success-criteria'].content, '')
 }
 
 {

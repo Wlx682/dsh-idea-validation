@@ -39,6 +39,8 @@
 
 新流程的数据结构是 `ideaDialogue`。六个 `layers` 保存内容、状态和来源说明，`nextFocus` 只引用一个未解决层，`progress` 展示已完成层数。`dialogue-step` 的真实答案固定映射到同一 case 的 `revise`，所以每轮仍停留在想法完善阶段；只有 `dialogue-complete` 才允许 `continue` 到问题定义。
 
+跨轮更新采用“历史保护投影”：非当前焦点的已确认层自动保留上一 revision，其他未决层可以随新上下文调整措辞、推测或暴露矛盾，但不能被静默标记为已确认。这样不会因正常草案演进卡死，也不会丢失用户已经确认的结论。
+
 `ideaExpansion / expansion-review` 和更早的 `clarificationQuestions / clarification-batch` 仍保留用于恢复旧 case，新任务不再走一次性完整脑补。
 
 ## 使用

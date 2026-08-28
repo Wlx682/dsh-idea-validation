@@ -120,6 +120,21 @@
         "每轮只用一张卡处理一个最高优先级遗漏或矛盾并更新同一 case",
         "所有关键层次确认后才出现进入问题定义的门禁"
       ]
+    },
+    {
+      "id": "S9",
+      "title": "对话历史保护不过度阻断",
+      "vertical_slice": true,
+      "priority": "P0",
+      "story_points": 2,
+      "sprint_scope": true,
+      "status": "completed",
+      "dependencies": ["S8"],
+      "acceptance_criteria": [
+        "非当前焦点的已确认层由运行时保持上一 revision 内容",
+        "其他未决层允许改写但不能被静默标成 confirmed 或 not-applicable",
+        "合法的未决草案演进不消耗 repair 且继续生成下一张卡"
+      ]
     }
   ]
 }
