@@ -5,37 +5,23 @@ function payloadFor(stage) {
   const payload = {
     ideaType: 'process',
     clarifications: [],
-    openQuestions: [
-      '你希望以什么形态落地？',
-      '首个试点选择哪条业务流程？',
-      '优先用什么指标判断成功？',
-    ],
-    clarificationQuestions: [
-      {
-        id: 'landing-shape', header: '落地形态', question: '你希望以什么形态落地？', multiSelect: false,
-        options: [
-          { label: '个人方法论', description: '先形成一个人可重复使用的方法。' },
-          { label: '团队工作流', description: '直接形成团队共同执行的流程。' },
-          { label: '个人试点后推广', description: '先小范围验证，再推广给团队。' },
-        ],
-      },
-      {
-        id: 'first-pilot', header: '首个试点', question: '首个试点选择哪条业务流程？', multiSelect: false,
-        options: [
-          { label: '需求到发布', description: '验证完整的需求交付链路。' },
-          { label: '团队协作', description: '先验证角色之间的协作流程。' },
-          { label: 'CI 与质量', description: '先验证自动化与质量门禁。' },
-        ],
-      },
-      {
-        id: 'success-metric', header: '成功指标', question: '优先用什么指标判断成功？', multiSelect: false,
-        options: [
-          { label: '返工率', description: '观察实现后返工是否减少。' },
-          { label: '交付周期', description: '观察从需求到交付是否缩短。' },
-          { label: '需求变更次数', description: '观察开发后的需求偏移是否减少。' },
-        ],
-      },
-    ],
+    openQuestions: [],
+    clarificationQuestions: [],
+    ideaExpansion: {
+      mission: '把模糊想法变成可快速删改的默认行动蓝图',
+      successMetric: '两轮选择内形成可进入方案验证的问题框架',
+      audiences: [
+        { label: '点子提出者', need: '不想填写需求表', scenario: '刚产生模糊想法时' },
+        { label: '研发负责人', need: '快速判断是否值得投入', scenario: '评审研发流程改进时' },
+        { label: '产品负责人', need: '获得可讨论的默认靶子', scenario: '需求尚未成形时' },
+      ],
+      primaryRoute: '生成六维默认草案后由用户只标记偏差',
+      alternativeRoutes: ['一键接受全部默认项', '逐维删除或修正偏移项'],
+      risks: ['脑补被误当成事实', '默认锚点误导决策', '逐项确认仍然过重'],
+      resources: { people: '1 名想法负责人', budget: '先零新增预算试点', timeline: '一个真实想法周期' },
+      deliverables: ['六维想法扩展草案', '经用户删改后的确认版本'],
+      assumptionNotice: '以下全部内容均为基于通用逻辑的待确认推测，不是用户事实或证据。',
+    },
     problem: {
       actor: '', situation: '', observedPain: '', impact: '', desiredOutcome: '', constraints: [], decisionToMake: '',
     },
@@ -135,6 +121,39 @@ function payloadFor(stage) {
     rollback: '停止门禁并保留实验记录',
     nextAction: '在具备写权限的开发模式中创建执行 Goal',
   }
+  return payload
+}
+
+function legacyClarifyPayload() {
+  const payload = payloadFor('clarify')
+  payload.ideaExpansion = {
+    mission: '', successMetric: '', audiences: [], primaryRoute: '', alternativeRoutes: [], risks: [],
+    resources: { people: '', budget: '', timeline: '' }, deliverables: [], assumptionNotice: '',
+  }
+  payload.openQuestions = ['你希望以什么形态落地？', '首个试点选择哪条业务流程？', '优先用什么指标判断成功？']
+  payload.clarificationQuestions = [
+    {
+      id: 'landing-shape', header: '落地形态', question: payload.openQuestions[0], multiSelect: false,
+      options: [
+        { label: '个人方法论', description: '先形成一个人可重复使用的方法。' },
+        { label: '团队工作流', description: '直接形成团队共同执行的流程。' },
+      ],
+    },
+    {
+      id: 'first-pilot', header: '首个试点', question: payload.openQuestions[1], multiSelect: false,
+      options: [
+        { label: '需求到发布', description: '验证完整的需求交付链路。' },
+        { label: '团队协作', description: '先验证角色之间的协作流程。' },
+      ],
+    },
+    {
+      id: 'success-metric', header: '成功指标', question: payload.openQuestions[2], multiSelect: false,
+      options: [
+        { label: '返工率', description: '观察实现后返工是否减少。' },
+        { label: '交付周期', description: '观察从需求到交付是否缩短。' },
+      ],
+    },
+  ]
   return payload
 }
 
@@ -266,14 +285,18 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   assert.match(rendered, /CARD_HANDOFF/)
   assert.match(rendered, /ask_user_question/)
   const handoff = JSON.parse(rendered.match(/CARD_HANDOFF \(mandatory root-agent protocol\):\n([\s\S]*?)\nPass caseId/)[1])
-  assert.equal(handoff.questions.length, 3)
-  assert.deepEqual(handoff.questions.map((question) => question.header), ['落地形态', '首个试点', '成功指标'])
-  assert.ok(handoff.questions.every((question) => question.options.length === 3))
-  assert.ok(handoff.questions.every((question) => !/[a-c][).、]/i.test(question.question)))
-  assert.ok(handoff.questions.every((question) => !question.options.some((option) => ['按现有信息继续', '重新澄清', '暂缓', '放弃'].includes(option.label))))
-  assert.equal(handoff.answerProtocol.mode, 'clarification-batch')
-  assert.equal(handoff.answerProtocol.decision, 'continue')
-  assert.equal(handoff.answerProtocol.answersBecomeHumanResponse, true)
+  assert.equal(handoff.questions.length, 1)
+  assert.equal(handoff.questions[0].header, '想法扩展')
+  assert.match(handoff.questions[0].question, /待确认推测/)
+  assert.doesNotMatch(handoff.questions[0].question, /请问|具体情况/)
+  assert.equal(handoff.answerProtocol.mode, 'expansion-review')
+  assert.equal(handoff.answerProtocol.detailQuestions.length, 6)
+  assert.deepEqual(handoff.answerProtocol.detailQuestions.map((question) => question.header), ['核心目标', '目标用户', '执行路径', '关键风险', '所需资源', '预期交付'])
+  assert.ok(handoff.answerProtocol.detailQuestions.every((question) => question.options.some((option) => option.label === '采用此推测')))
+  assert.deepEqual(handoff.answerProtocol.selected.find((item) => item.label === '全盘通过'), { label: '全盘通过', decision: 'continue', humanResponse: '全盘通过六维想法扩展草案。' })
+  assert.equal(handoff.answerProtocol.selected.find((item) => item.label === '逐项检查').action, 'ask-detail')
+  assert.equal(handoff.answerProtocol.detailAnswerProtocol.decision, 'continue')
+  assert.equal(handoff.answerProtocol.detailAnswerProtocol.answersBecomeHumanResponse, true)
   assert.match(rendered, new RegExp(started.result.caseId))
 }
 
@@ -293,7 +316,7 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
 {
   const test = setup()
   const invalid = payloadFor('clarify')
-  invalid.openQuestions = []
+  invalid.ideaExpansion.risks = []
   test.enqueue(invalid)
   test.enqueue(payloadFor('clarify'))
   const repaired = await test.tool.execute(
@@ -306,17 +329,17 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   assert.equal(test.starts[0].args.phaseTitle, 'clarify')
   assert.equal(test.starts[1].args.phaseTitle, 'clarify')
   assert.match(test.starts[1].args.prompt, /Repair only the clarify payload/)
-  assert.match(test.starts[1].args.prompt, /openQuestions/)
+  assert.match(test.starts[1].args.prompt, /ideaExpansion\.risks/)
   assert.equal(test.disposed, 2)
 }
 
 {
   const test = setup()
-  const embeddedChoices = payloadFor('clarify')
+  const embeddedChoices = legacyClarifyPayload()
   embeddedChoices.openQuestions[0] = '你希望以什么形态落地：a) 个人方法论 b) 团队工作流 c) 团队推广？'
   embeddedChoices.clarificationQuestions[0].question = embeddedChoices.openQuestions[0]
   test.enqueue(embeddedChoices)
-  test.enqueue(payloadFor('clarify'))
+  test.enqueue(legacyClarifyPayload())
   const repaired = await test.tool.execute(
     { action: 'start', request: '拒绝把三个选项塞进一个问题' },
     { agent: test.parent, signal: test.signal },

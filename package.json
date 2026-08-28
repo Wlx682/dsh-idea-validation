@@ -1,12 +1,13 @@
 {
   "name": "dsh-idea-validation",
   "description": "A stateful, human-gated idea validation workflow plugin for DeepSeek Harness",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "main": "index.js",
   "scripts": {
     "test:dedicated": "node scripts/idea-validation-dedicated-regression.mjs",
-    "test": "npm run test:dedicated && node test.mjs"
+    "test:smoke": "node scripts/idea-validation-host-contract-smoke.mjs",
+    "test": "npm run test:dedicated && node test.mjs && npm run test:smoke"
   },
   "exports": {
     ".": "./index.js",
@@ -16,7 +17,9 @@
     "index.js",
     "workflow.js",
     "runtime.js",
-    "preset"
+    "preset",
+    "scripts",
+    "test.mjs"
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

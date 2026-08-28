@@ -90,6 +90,21 @@
         "每张卡的问题正文只问一件事且选项能直接回答该问题",
         "整组答案聚合为一次 humanResponse 并只继续同一 case 一次"
       ]
+    },
+    {
+      "id": "S7",
+      "title": "强行脑补与轻量确认",
+      "vertical_slice": true,
+      "priority": "P0",
+      "story_points": 5,
+      "sprint_scope": true,
+      "status": "completed",
+      "dependencies": ["S6"],
+      "acceptance_criteria": [
+        "模糊想法首阶段不追问并生成完整六维推测草案",
+        "用户可一键全盘通过或选择逐项检查后看到六张一维一卡",
+        "脑补内容不进入证据且整组确认只继续同一 case 一次"
+      ]
     }
   ]
 }
