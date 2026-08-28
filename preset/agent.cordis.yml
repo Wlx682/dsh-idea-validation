@@ -1,5 +1,5 @@
-# The `problem-discovery` preset is a purpose-built Agent composition. It
-# exposes evidence-discovery tools and one fixed workflow without the Standard
+# The `idea-validation` preset is a purpose-built Agent composition. It
+# exposes targeted Web evidence and one stateful workflow without the Standard
 # preset's shell, filesystem mutation, Goal, generic delegation, planning, or
 # implementation controls.
 #
@@ -12,7 +12,7 @@
   name: '@deepseek-ai/dsh-persona'
   config:
     text: >-
-      You are a problem-discovery facilitator powered by the {{model}} model. Your working directory is {{cwd}}. Help the direct human turn an incomplete idea into an evidence-labeled, falsifiable Problem Brief before PRD, design, Goal creation, or implementation. Do not treat a proposed solution as proof of a problem. Use tools only to collect or verify evidence; never modify the workspace.
+      You are an idea-decision facilitator powered by the {{model}} model. Your working directory is {{cwd}}. Advance exactly one human-gated stage at a time: clarify, frame, evidence plan/result, options, experiment, or implementation handoff. Never run a parallel discovery pass before the workflow, never treat a proposed solution as proof of a problem, and never invent human approval. Workspace files are not evidence unless the direct human explicitly authorizes their exact path. Use tools only during an approved evidence-result stage; never modify the workspace.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -21,21 +21,15 @@
 
 # ── read-only discovery ──────────────────────────────────────────────────────
 
-# These tools provide repository-wide name and content search without exposing
-# shell execution or the filesystem write/edit tools.
-- id: tool-fs-search
-  name: '@deepseek-ai/dsh-tool-fs-search'
-  config:
-    sampleOverCapGlobResults: false
-
+# Web search remains available for the approved evidence-result stage. The
+# workflow no longer exposes repository-wide search by default: authorization
+# is not the same as relevance, and an unrelated workspace artifact must never
+# become evidence about the direct human or their organization.
 - id: tool-web
   name: '@deepseek-ai/dsh-tool-web'
   config:
     fetch: false
     searchTimeoutMs: 60000
-
-- id: tool-ask-user
-  name: '@deepseek-ai/dsh-tool-ask-user'
 
 # ── compaction ───────────────────────────────────────────────────────────────
 
@@ -61,7 +55,7 @@
 
 # ── fixed workflow ───────────────────────────────────────────────────────────
 
-# The workflow engine and its Problem Discovery consumer share one preset-local
+# The workflow engine and its Idea Validation consumer share one preset-local
 # realm. The subagent registry and spawn provider remain Host services.
 - id: delegation
   name: cordis:group
@@ -74,15 +68,14 @@
       config:
         provider: spawn
 
-    - id: problem-discovery
-      name: dsh-problem-discovery
+    - id: idea-validation
+      name: dsh-idea-validation/workflow
 
 # ── presentation ─────────────────────────────────────────────────────────────
 
-# Every workflow child inherits this preset. Both presentation exposes native
-# discovery tools and PTC together; the fixed phase prompts make Collect prefer
-# run_code for broad scanning while later phases make fresh semantic judgments.
+# Every workflow child inherits this preset. Native presentation avoids the
+# broad run_code scans that made the former Collect stage expensive and noisy.
 - id: tool-presentation
   name: '@deepseek-ai/dsh-agent-tool-presentation'
   config:
-    mode: both
+    mode: native

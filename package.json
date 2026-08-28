@@ -1,17 +1,21 @@
 {
-  "name": "dsh-problem-discovery",
-  "description": "A fixed three-stage problem-discovery workflow plugin for DeepSeek Harness",
-  "version": "0.1.1-rc.2",
+  "name": "dsh-idea-validation",
+  "description": "A stateful, human-gated idea validation workflow plugin for DeepSeek Harness",
+  "version": "0.2.0",
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node test.mjs"
+    "test:dedicated": "node scripts/idea-validation-dedicated-regression.mjs",
+    "test": "npm run test:dedicated && node test.mjs"
   },
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./workflow": "./workflow.js"
   },
   "files": [
     "index.js",
+    "workflow.js",
+    "runtime.js",
     "preset"
   ],
   "engines": {
@@ -19,16 +23,17 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Wlx682/dsh-problem-discovery.git"
+    "url": "git+https://github.com/Wlx682/dsh-idea-validation.git"
   },
   "bugs": {
-    "url": "https://github.com/Wlx682/dsh-problem-discovery/issues"
+    "url": "https://github.com/Wlx682/dsh-idea-validation/issues"
   },
-  "homepage": "https://github.com/Wlx682/dsh-problem-discovery#readme",
+  "homepage": "https://github.com/Wlx682/dsh-idea-validation#readme",
   "license": "MIT",
   "keywords": [
     "deepseek-harness",
     "dsh",
+    "idea-validation",
     "problem-discovery",
     "workflow"
   ]

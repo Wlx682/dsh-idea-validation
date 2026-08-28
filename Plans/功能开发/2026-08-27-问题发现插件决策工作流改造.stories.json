@@ -1,0 +1,65 @@
+{
+  "epic": "问题发现插件决策工作流改造",
+  "stories": [
+    {
+      "id": "S1",
+      "title": "跨轮次澄清并确认问题",
+      "vertical_slice": true,
+      "priority": "P0",
+      "story_points": 5,
+      "sprint_scope": true,
+      "status": "completed",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "启动后返回 caseId、revision 和最多三个澄清问题",
+        "用户回答被写入状态并用于问题定义",
+        "未经用户确认不能进入取证"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "围绕单一高风险假设定向取证",
+      "vertical_slice": true,
+      "priority": "P0",
+      "story_points": 5,
+      "sprint_scope": true,
+      "status": "completed",
+      "dependencies": ["S1"],
+      "acceptance_criteria": [
+        "取证前先确认证据计划",
+        "证据区分 user、workspace、web、experiment 来源",
+        "workspace 证据必须命中显式授权路径"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "形成可归因实验和实施交接",
+      "vertical_slice": true,
+      "priority": "P0",
+      "story_points": 5,
+      "sprint_scope": true,
+      "status": "completed",
+      "dependencies": ["S2"],
+      "acceptance_criteria": [
+        "比较二到三个方案并由用户选择",
+        "实验只有一个主指标且包含干预、比较与阈值",
+        "输出不超过五步的关键路径和可执行交接"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "失败恢复与专项回归",
+      "vertical_slice": true,
+      "priority": "P0",
+      "story_points": 3,
+      "sprint_scope": true,
+      "status": "completed",
+      "dependencies": ["S1", "S2", "S3"],
+      "acceptance_criteria": [
+        "格式失败只修当前阶段一次",
+        "重复请求幂等且陈旧 revision 被拒绝",
+        "专项回归覆盖本次真实失败模式"
+      ]
+    }
+  ]
+}
