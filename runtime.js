@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /** Stateful, human-gated idea validation runtime for DeepSeek Harness. */
 const name = "idea-validation";
@@ -9,6 +11,8 @@ const MAX_CASES = 128;
 const MAX_TRANSITIONS = 256;
 const MAX_PAYLOAD_CHARS = 30_000;
 const MAX_STATE_CHARS = 44_000;
+const DEFAULT_STATE_DIR = ".dsh/idea-validation";
+const DEFAULT_HANDOFF_DIR = "Plans/想法验证";
 const STAGES = [
 	"clarify",
 	"frame",
@@ -1109,6 +1113,10 @@ function validateState(value) {
 	state.authorizedSources = normalizeSources(state.authorizedSources);
 	state.payload = readPayload(state.payload, state.stage === "complete" ? "complete" : state.stage, state.authorizedSources);
 	if (!Array.isArray(state.decisionLog)) throw new TypeError("state.decisionLog must be an array");
+	state.createdAt = typeof state.createdAt === "string" && !Number.isNaN(Date.parse(state.createdAt))
+		? state.createdAt
+		: new Date().toISOString();
+	delete state.persistence;
 	state.gate = TERMINAL_STATUSES.includes(state.status) ? { prompt: "", allowedDecisions: [] } : gateFor(state.stage, state.payload);
 	if (JSON.stringify(state).length > MAX_STATE_CHARS) throw new TypeError(`state exceeds ${MAX_STATE_CHARS} characters`);
 	return structuredClone(state);
@@ -1118,18 +1126,215 @@ function storeCase(parentKey, state) {
 	remember(cases, `${parentKey}\u0000${state.caseId}`, structuredClone(state), MAX_CASES);
 }
 
-function resolveCase(parentKey, args) {
+function configuredRelativeDir(value, fallback, name) {
+	const directory = value ?? fallback;
+	if (typeof directory !== "string" || directory.trim().length === 0) throw new TypeError(`${name} must be a non-empty relative directory`);
+	const trimmed = directory.trim().replaceAll("\\", "/").replace(/\/$/, "");
+	if (isAbsolute(trimmed) || trimmed === "." || trimmed.split("/").includes("..")) {
+		throw new TypeError(`${name} must be a relative directory inside the workspace`);
+	}
+	return trimmed;
+}
+
+function workspaceRoot(parent) {
+	const cwd = parent?.session?.header?.cwd;
+	if (cwd === undefined) return undefined;
+	if (typeof cwd !== "string" || !isAbsolute(cwd)) throw new Error("idea_validation caller cwd must be an absolute path");
+	return cwd;
+}
+
+function safeCaseSegment(caseId) {
+	if (/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(caseId) && caseId !== "..") return caseId;
+	return hashValue(caseId);
+}
+
+function safeIdeaSlug(value) {
+	const slug = value.normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 48);
+	return slug || "idea";
+}
+
+function insideWorkspace(cwd, relativePath) {
+	const target = resolve(cwd, relativePath);
+	const offset = relative(cwd, target);
+	if (offset === ".." || offset.startsWith(`..${sep}`) || isAbsolute(offset)) throw new Error("persistence path escapes the workspace");
+	return target;
+}
+
+function persistenceLocations(parent, config, state, includeHandoff) {
+	const cwd = workspaceRoot(parent);
+	if (cwd === undefined) return undefined;
+	const caseFile = `${config.stateDir}/cases/${safeCaseSegment(state.caseId)}.json`;
+	const suffix = safeCaseSegment(state.caseId).slice(0, 12);
+	const date = state.createdAt.slice(0, 10);
+	const handoffFile = includeHandoff
+		? `${config.handoffDir}/${date}-${safeIdeaSlug(state.originalRequest)}-${suffix}.md`
+		: undefined;
+	insideWorkspace(cwd, caseFile);
+	if (handoffFile !== undefined) insideWorkspace(cwd, handoffFile);
+	return { cwd, caseFile, handoffFile };
+}
+
+async function safeDirectory(cwd, targetDirectory, create) {
+	const root = await realpath(cwd);
+	const offset = relative(cwd, targetDirectory);
+	if (offset === ".." || offset.startsWith(`..${sep}`) || isAbsolute(offset)) throw new Error("persistence directory escapes the workspace");
+	let current = cwd;
+	for (const segment of offset.split(sep).filter(Boolean)) {
+		current = join(current, segment);
+		let details;
+		try {
+			details = await lstat(current);
+		} catch (error) {
+			if (error?.code !== "ENOENT" || !create) throw error;
+			try {
+				await mkdir(current, { mode: 0o700 });
+			} catch (mkdirError) {
+				if (mkdirError?.code !== "EEXIST") throw mkdirError;
+			}
+			details = await lstat(current);
+		}
+		if (details.isSymbolicLink()) throw new Error("persistence directory must not contain symbolic links");
+		if (!details.isDirectory()) throw new Error("persistence directory path contains a non-directory entry");
+		const realCurrent = await realpath(current);
+		const realOffset = relative(root, realCurrent);
+		if (realOffset === ".." || realOffset.startsWith(`..${sep}`) || isAbsolute(realOffset)) {
+			throw new Error("persistence directory escapes the workspace");
+		}
+	}
+}
+
+async function assertSafeFileTarget(target) {
+	try {
+		const details = await lstat(target);
+		if (details.isSymbolicLink()) throw new Error("persistence file must not be a symbolic link");
+		if (!details.isFile()) throw new Error("persistence target must be a regular file");
+	} catch (error) {
+		if (error?.code !== "ENOENT") throw error;
+	}
+}
+
+async function atomicWrite(cwd, target, content) {
+	await safeDirectory(cwd, dirname(target), true);
+	await assertSafeFileTarget(target);
+	const temporary = join(dirname(target), `.${basename(target)}.tmp-${process.pid}-${randomUUID()}`);
+	try {
+		await writeFile(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+		await rename(temporary, target);
+	} catch (error) {
+		await unlink(temporary).catch(() => {});
+		throw error;
+	}
+}
+
+async function readPersistedFile(cwd, target) {
+	await safeDirectory(cwd, dirname(target), false);
+	await assertSafeFileTarget(target);
+	return readFile(target, "utf8");
+}
+
+function markdownList(items) {
+	return items.length === 0 ? "- 无" : items.map((item) => `- ${item}`).join("\n");
+}
+
+function renderHandoffMarkdown(state) {
+	const handoff = state.payload.implementationHandoff;
+	const path = state.payload.criticalPath.map((step) => (
+		`${step.order}. **${step.outcome}**\n   - 负责人：${step.owner}\n   - 依赖：${step.dependency}\n   - 验收：${step.acceptance}`
+	)).join("\n");
+	return `# 想法验证交接
+
+- Case ID: \`${state.caseId}\`
+- 原始想法：${state.originalRequest}
+- 终态修订：${state.revision}
+
+## 目标
+
+${handoff.objective}
+
+## Scope In
+
+${markdownList(handoff.scopeIn)}
+
+## Scope Out
+
+${markdownList(handoff.scopeOut)}
+
+## 验收标准
+
+${markdownList(handoff.acceptanceCriteria)}
+
+## 埋点
+
+${markdownList(handoff.instrumentation)}
+
+## 回滚
+
+${handoff.rollback}
+
+## 关键路径
+
+${path || "1. 无"}
+
+## 下一动作
+
+${handoff.nextAction}
+`;
+}
+
+async function persistCase(parentKey, parent, config, state, includeHandoff = false) {
+	const locations = persistenceLocations(parent, config, state, includeHandoff);
+	if (locations === undefined) {
+		storeCase(parentKey, state);
+		return state;
+	}
+	const persisted = structuredClone(state);
+	persisted.persistence = {
+		caseFile: locations.caseFile,
+		...(locations.handoffFile === undefined ? {} : { handoffFile: locations.handoffFile })
+	};
+	if (JSON.stringify(persisted).length > MAX_STATE_CHARS) throw new Error(`state exceeds ${MAX_STATE_CHARS} characters`);
+	if (locations.handoffFile !== undefined) {
+		await atomicWrite(locations.cwd, insideWorkspace(locations.cwd, locations.handoffFile), renderHandoffMarkdown(persisted));
+	}
+	await atomicWrite(locations.cwd, insideWorkspace(locations.cwd, locations.caseFile), `${JSON.stringify(persisted, null, 2)}\n`);
+	storeCase(parentKey, persisted);
+	return persisted;
+}
+
+async function resolveCase(parentKey, parent, config, args) {
 	const requestedId = typeof args.caseId === "string" ? args.caseId.trim() : "";
-	const stored = requestedId.length > 0 ? cases.get(`${parentKey}\u0000${requestedId}`) : undefined;
-	const state = stored === undefined ? validateState(args.state) : structuredClone(stored);
+	let stored = requestedId.length > 0 ? cases.get(`${parentKey}\u0000${requestedId}`) : undefined;
+	if (stored === undefined && requestedId.length > 0) {
+		const locations = persistenceLocations(parent, config, {
+			caseId: requestedId,
+			createdAt: new Date().toISOString(),
+			originalRequest: ""
+		}, false);
+		if (locations !== undefined) {
+			try {
+				stored = JSON.parse(await readPersistedFile(locations.cwd, insideWorkspace(locations.cwd, locations.caseFile)));
+			} catch (error) {
+				if (error?.code !== "ENOENT") throw new Error(`failed to load persisted case ${requestedId}: ${error.message}`, { cause: error });
+			}
+		}
+	}
+	let state = stored === undefined ? validateState(args.state) : validateState(stored);
 	if (requestedId.length > 0 && state.caseId !== requestedId) throw new Error("caseId does not match the supplied state");
+	const locations = persistenceLocations(parent, config, state, state.status === "complete");
+	if (locations !== undefined) {
+		state.persistence = {
+			caseFile: locations.caseFile,
+			...(locations.handoffFile === undefined ? {} : { handoffFile: locations.handoffFile })
+		};
+	}
 	return state;
 }
 
-function makeState({ caseId, revision, originalRequest, stage, authorizedSources, payload, decisionLog, status }) {
+function makeState({ caseId, revision, originalRequest, stage, authorizedSources, payload, decisionLog, status, createdAt, persistence }) {
 	const state = {
 		version: STATE_VERSION,
 		caseId,
+		createdAt: createdAt ?? new Date().toISOString(),
 		revision,
 		originalRequest,
 		stage,
@@ -1137,7 +1342,8 @@ function makeState({ caseId, revision, originalRequest, stage, authorizedSources
 		authorizedSources,
 		payload,
 		gate: stage === "complete" ? { prompt: "", allowedDecisions: [] } : gateFor(stage, payload),
-		decisionLog
+		decisionLog,
+		...(persistence === undefined ? {} : { persistence })
 	};
 	if (JSON.stringify(state).length > MAX_STATE_CHARS) throw new Error(`state exceeds ${MAX_STATE_CHARS} characters`);
 	return state;
@@ -1147,7 +1353,7 @@ function logDecision(state, decision, response) {
 	return [...state.decisionLog, { revision: state.revision, stage: state.stage, decision, response: response || "" }];
 }
 
-async function startCase(ctx, parent, signal, parentKey, args) {
+async function startCase(ctx, parent, signal, parentKey, config, args) {
 	const request = typeof args.request === "string" ? args.request.trim() : "";
 	if (request.length === 0) throw new TypeError("request must be a non-empty string when action=start");
 	const context = typeof args.context === "string" ? args.context.trim() : "";
@@ -1162,12 +1368,12 @@ async function startCase(ctx, parent, signal, parentKey, args) {
 		payload: advanced.payload,
 		decisionLog: []
 	});
-	storeCase(parentKey, state);
-	return { runId: advanced.runIds.at(-1), runIds: advanced.runIds, agentsStarted: advanced.agentsStarted, result: state };
+	const persisted = await persistCase(parentKey, parent, config, state);
+	return { runId: advanced.runIds.at(-1), runIds: advanced.runIds, agentsStarted: advanced.agentsStarted, result: persisted };
 }
 
-async function continueCase(ctx, parent, signal, parentKey, args) {
-	const state = resolveCase(parentKey, args);
+async function continueCase(ctx, parent, signal, parentKey, config, args) {
+	const state = await resolveCase(parentKey, parent, config, args);
 	if (TERMINAL_STATUSES.includes(state.status)) throw new Error(`case ${state.caseId} is already ${state.status}`);
 	if (!Number.isSafeInteger(args.expectedRevision)) throw new TypeError("expectedRevision is required when action=continue");
 	if (args.expectedRevision !== state.revision) throw new Error(`stale case revision: expected ${state.revision}, received ${args.expectedRevision}`);
@@ -1187,15 +1393,15 @@ async function continueCase(ctx, parent, signal, parentKey, args) {
 	if (decision === "defer" || decision === "reject") {
 		const stopped = makeState({ ...state, revision: state.revision + 1, status: decision === "defer" ? "deferred" : "rejected", decisionLog });
 		stopped.gate = { prompt: "", allowedDecisions: [] };
-		storeCase(parentKey, stopped);
-		return { runId: "state-transition", runIds: [], agentsStarted: 0, result: stopped };
+		const persisted = await persistCase(parentKey, parent, config, stopped);
+		return { runId: "state-transition", runIds: [], agentsStarted: 0, result: persisted };
 	}
 
 	const targetStage = nextStage(state.stage, decision);
 	if (targetStage === "complete") {
 		const completed = makeState({ ...state, revision: state.revision + 1, stage: "complete", status: "complete", decisionLog });
-		storeCase(parentKey, completed);
-		return { runId: "state-transition", runIds: [], agentsStarted: 0, result: completed };
+		const persisted = await persistCase(parentKey, parent, config, completed, true);
+		return { runId: "state-transition", runIds: [], agentsStarted: 0, result: persisted };
 	}
 
 	const advanced = await runStage(ctx, parent, signal, targetStage, transitionPrompt(state, targetStage, decision, response), state.authorizedSources, state.payload);
@@ -1207,8 +1413,8 @@ async function continueCase(ctx, parent, signal, parentKey, args) {
 		payload: advanced.payload,
 		decisionLog
 	});
-	storeCase(parentKey, next);
-	return { runId: advanced.runIds.at(-1), runIds: advanced.runIds, agentsStarted: advanced.agentsStarted, result: next };
+	const persisted = await persistCase(parentKey, parent, config, next);
+	return { runId: advanced.runIds.at(-1), runIds: advanced.runIds, agentsStarted: advanced.agentsStarted, result: persisted };
 }
 
 function boundResult(text, maxChars) {
@@ -1231,7 +1437,9 @@ function renderResult(state, maxChars) {
 function resolveConfig(config) {
 	const maxResultChars = config?.maxResultChars ?? 48_000;
 	if (!Number.isSafeInteger(maxResultChars) || maxResultChars < 1) throw new TypeError("maxResultChars must be a positive safe integer");
-	return { maxResultChars };
+	const stateDir = configuredRelativeDir(config?.stateDir, DEFAULT_STATE_DIR, "stateDir");
+	const handoffDir = configuredRelativeDir(config?.handoffDir, DEFAULT_HANDOFF_DIR, "handoffDir");
+	return { maxResultChars, stateDir, handoffDir };
 }
 
 function presentCall(args) {
@@ -1315,8 +1523,8 @@ function apply(ctx, config) {
 			const cached = transitions.get(transitionKey);
 			if (cached !== undefined) return cached;
 			const pending = action === "start"
-				? startCase(ctx, parent, exec.signal, parentKey, args)
-				: continueCase(ctx, parent, exec.signal, parentKey, args);
+				? startCase(ctx, parent, exec.signal, parentKey, resolved, args)
+				: continueCase(ctx, parent, exec.signal, parentKey, resolved, args);
 			remember(transitions, transitionKey, pending, MAX_TRANSITIONS);
 			try {
 				return await pending;

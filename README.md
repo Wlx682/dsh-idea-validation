@@ -76,7 +76,9 @@
 }
 ```
 
-运行时会保存最近的 case，因此正常续做只需 `caseId + expectedRevision`。状态快照同时随结果返回，可在进程重启后通过 `state` 参数恢复。相同参数的重复调用是幂等的；陈旧 revision 会被拒绝。
+有 session `cwd` 时，每次成功转换会把完整 case 原子写入 `.dsh/idea-validation/cases/<caseId>.json`，因此进程重启后仍只需 `caseId + expectedRevision` 即可续做。无 `cwd`、迁移工作区或磁盘状态不可用时，仍可通过结果中的 `STATE_SNAPSHOT` 作为 `state` 参数恢复。相同参数的重复调用是幂等的；陈旧 revision 会被拒绝。
+
+当 `implementation` 阶段最终被批准时，运行时还会向 `Plans/想法验证/` 导出确定性命名的 Markdown 交接物，包含目标、Scope In/Out、验收标准、埋点、回滚、关键路径和下一动作。这是交接材料落盘，不代表业务代码已经实施。
 
 ## 证据边界
 
@@ -97,7 +99,19 @@ mkdir -p ~/.dsh/.agent-presets/idea-validation
 cp preset/agent.cordis.yml preset/preset.yml ~/.dsh/.agent-presets/idea-validation/
 ```
 
-重启 DSH Web 后选择“想法验证模式”。preset 默认只提供卡片提问、Web 搜索和状态工作流，不提供 shell、文件修改、Goal 或通用委派；也不再暴露全仓库搜索，以避免无关文件污染问题证据。
+重启 DSH Web 后选择“想法验证模式”。preset 默认只提供卡片提问、Web 搜索和状态工作流，不向 Agent 提供 shell、文件修改、Goal 或通用委派；也不再暴露全仓库搜索，以避免无关文件污染问题证据。case JSON 和终态 Markdown 由插件运行时写入受控目录，不会让模型选择任意路径或任意内容操作。
+
+可在 `preset/agent.cordis.yml` 的 `idea-validation` 项下覆盖相对目录：
+
+```yaml
+    - id: idea-validation
+      name: dsh-idea-validation/workflow
+      config:
+        stateDir: .dsh/idea-validation
+        handoffDir: Plans/想法验证
+```
+
+两个配置都只接受 session `cwd` 内的相对目录；绝对路径和包含 `..` 的路径会在加载时被拒绝。
 
 preset 使用稳定子入口 `dsh-idea-validation/workflow`。从旧版原地升级且暂时不能重启长驻 DSH 进程时，也可把已安装 preset 的该行临时改为 `../../profiles/web/node_modules/dsh-idea-validation/runtime.js`，用新的模块文件完成热迁移；正式部署仍建议在方便时重启一次 Web 服务。
 
@@ -116,5 +130,5 @@ npm test
 
 - 插件负责把想法推进到“实施就绪”，不在只读 preset 内声称已经实现。
 - 人类决定 proceed、pivot、defer 或 reject；Agent 只提供结构化判断材料。
-- 运行时状态是便利缓存，返回的状态快照才是可迁移恢复材料。
+- 运行时在有 `cwd` 时原子持久化 case；返回的状态快照仍是跨工作区迁移和手工恢复材料。
 - 所有阶段共享同一 preset；通过删除默认文件搜索、使用 `native` 工具呈现和宿主语义校验收紧边界。

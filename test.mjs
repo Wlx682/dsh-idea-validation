@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { apply, inject, name } from './index.js'
 
 function ideaDialogueAt(round = 1) {
@@ -284,7 +287,7 @@ function stateFor(stage, payload = payloadFor(stage), authorizedSources = []) {
 }
 
 let parentCounter = 0
-function setup() {
+function setup({ config, cwd } = {}) {
   let registeredTool
   const commands = new Map()
   let promptSection
@@ -311,8 +314,11 @@ function setup() {
       },
     },
   }
-  apply(context)
-  const parent = { id: `parent-${++parentCounter}` }
+  apply(context, config)
+  const parent = {
+    id: `parent-${++parentCounter}`,
+    ...(cwd === undefined ? {} : { session: { header: { cwd } } }),
+  }
   const signal = new AbortController().signal
   const enqueue = (payload, overrides = {}) => queue.push({
     stopReason: 'completed', agentsStarted: 1, value: { payload }, ...overrides,
@@ -362,6 +368,7 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   assert.equal(started.result.stage, 'clarify')
   assert.equal(started.result.revision, 1)
   assert.equal(started.result.originalRequest, '优化需求到开发的工作流')
+  assert.equal(started.result.persistence, undefined, '无 cwd 宿主应保持原有内存模式')
   assert.deepEqual(started.result.gate.allowedDecisions, ['revise', 'defer', 'reject'])
   assert.equal(test.starts[0].maxTotalAgents, 1)
   assert.equal(test.starts[0].args.phaseTitle, 'clarify')
@@ -588,6 +595,88 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   assert.equal(stopped.result.status, 'deferred')
   assert.equal(stopped.agentsStarted, 0)
   assert.equal(test.starts.length, 0)
+}
+
+await assert.rejects(async () => {
+  setup({ config: { stateDir: '../outside-workspace' }, cwd: '/workspace' })
+}, /stateDir.*relative|stateDir.*workspace/)
+
+{
+  const cwd = await mkdtemp(join(tmpdir(), 'idea-validation-symlink-'))
+  const outside = await mkdtemp(join(tmpdir(), 'idea-validation-outside-'))
+  try {
+    await symlink(outside, join(cwd, 'linked'))
+    const test = setup({ cwd, config: { stateDir: 'linked' } })
+    test.enqueue(payloadFor('clarify'))
+    await assert.rejects(
+      test.tool.execute(
+        { action: 'start', request: '不允许符号链接越界' },
+        { agent: test.parent, signal: test.signal },
+      ),
+      /symbolic links|escapes the workspace/,
+    )
+    assert.deepEqual(await readdir(outside), [])
+  } finally {
+    await rm(cwd, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  }
+}
+
+{
+  const cwd = await mkdtemp(join(tmpdir(), 'idea-validation-persist-'))
+  try {
+    const firstHost = setup({ cwd })
+    firstHost.enqueue(payloadFor('clarify'))
+    const started = await firstHost.tool.execute(
+      { action: 'start', request: '跨进程恢复想法' },
+      { agent: firstHost.parent, signal: firstHost.signal },
+    )
+    assert.equal(started.result.persistence.caseFile, `.dsh/idea-validation/cases/${started.result.caseId}.json`)
+    const storedStart = JSON.parse(await readFile(join(cwd, started.result.persistence.caseFile), 'utf8'))
+    assert.equal(storedStart.caseId, started.result.caseId)
+    assert.equal(storedStart.revision, 1)
+
+    const restartedHost = setup({ cwd })
+    restartedHost.enqueue(dialoguePayload(2))
+    const resumed = await restartedHost.tool.execute({
+      action: 'continue',
+      caseId: started.result.caseId,
+      expectedRevision: 1,
+      decision: 'revise',
+      humanResponse: JSON.stringify([{ id: 'persisted-answer', selected: ['研发负责人'] }]),
+    }, { agent: restartedHost.parent, signal: restartedHost.signal })
+    assert.equal(resumed.result.revision, 2)
+    assert.equal(resumed.result.payload.ideaDialogue.nextFocus.layerId, 'constraints-resources')
+    const storedResume = JSON.parse(await readFile(join(cwd, resumed.result.persistence.caseFile), 'utf8'))
+    assert.equal(storedResume.revision, 2)
+    assert.deepEqual((await readdir(join(cwd, '.dsh/idea-validation/cases'))).filter(name => name.includes('.tmp-')), [])
+  } finally {
+    await rm(cwd, { recursive: true, force: true })
+  }
+}
+
+{
+  const cwd = await mkdtemp(join(tmpdir(), 'idea-validation-export-'))
+  try {
+    const test = setup({ cwd })
+    const completed = await test.tool.execute({
+      action: 'continue', state: stateFor('implementation'), expectedRevision: 1, decision: 'approve',
+    }, { agent: test.parent, signal: test.signal })
+    assert.equal(completed.result.status, 'complete')
+    assert.match(completed.result.persistence.handoffFile, /^Plans\/想法验证\/.+\.md$/)
+    const handoff = await readFile(join(cwd, completed.result.persistence.handoffFile), 'utf8')
+    assert.match(handoff, /^# 想法验证交接/m)
+    assert.match(handoff, /## 目标/)
+    assert.match(handoff, /## Scope In/)
+    assert.match(handoff, /## 验收标准/)
+    assert.match(handoff, /## 埋点/)
+    assert.match(handoff, /## 回滚/)
+    assert.match(handoff, /## 关键路径/)
+    const storedComplete = JSON.parse(await readFile(join(cwd, completed.result.persistence.caseFile), 'utf8'))
+    assert.equal(storedComplete.persistence.handoffFile, completed.result.persistence.handoffFile)
+  } finally {
+    await rm(cwd, { recursive: true, force: true })
+  }
 }
 
 console.log('dsh-idea-validation tests passed')

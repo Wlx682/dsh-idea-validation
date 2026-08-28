@@ -1,7 +1,8 @@
 # The `idea-validation` preset is a purpose-built Agent composition. It
 # exposes targeted Web evidence and one stateful workflow without the Standard
-# preset's shell, filesystem mutation, Goal, generic delegation, planning, or
-# implementation controls.
+# preset's shell, Agent-controlled filesystem mutation, Goal, generic delegation,
+# planning, or implementation controls. The workflow runtime itself persists
+# case JSON and approved handoff Markdown to fixed cwd-relative directories.
 #
 # Host services remain in the Profile composition. A service created here must
 # live in an isolate realm so another preset cannot resolve or collide with it.

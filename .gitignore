@@ -7,3 +7,4 @@ README.i18n.yaml
 README.zh.md
 node_modules
 *.tgz
+.dsh/idea-validation/
