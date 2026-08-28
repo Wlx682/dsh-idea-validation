@@ -1,7 +1,7 @@
 {
   "name": "dsh-idea-validation",
   "description": "A stateful, human-gated idea validation workflow plugin for DeepSeek Harness",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "main": "index.js",
   "scripts": {

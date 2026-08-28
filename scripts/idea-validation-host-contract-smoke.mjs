@@ -18,8 +18,9 @@ assert.equal(tool.name, 'idea_validation')
 assert.equal(tool.parameters.type, 'object')
 assert.deepEqual(tool.parameters.properties.action.enum, ['start', 'continue'])
 assert.equal(promptSection.name, 'tool:idea-validation')
-assert.match(promptSection.text, /expansion-review/)
-assert.match(promptSection.text, /detailQuestions/)
+assert.match(promptSection.text, /dialogue-step/)
+assert.match(promptSection.text, /single-focus/)
+assert.match(promptSection.text, /same caseId/)
 assert.deepEqual([...commands.keys()].sort(), ['idea-workflow', 'problem-discovery'])
 
 const steered = []
@@ -29,6 +30,7 @@ const result = commands.get('idea-workflow').handler({
 })
 assert.deepEqual(result, { kind: 'success', text: 'Idea workflow started.' })
 assert.match(steered[0].content[0].text, /action=start/)
-assert.match(steered[0].content[0].text, /逐项检查/)
+assert.match(steered[0].content[0].text, /dialogue-step/)
+assert.match(steered[0].content[0].text, /revise/)
 
 console.log('dsh-idea-validation host-contract smoke passed')

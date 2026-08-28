@@ -105,6 +105,21 @@
         "用户可一键全盘通过或选择逐项检查后看到六张一维一卡",
         "脑补内容不进入证据且整组确认只继续同一 case 一次"
       ]
+    },
+    {
+      "id": "S8",
+      "title": "交互式想法补全",
+      "vertical_slice": true,
+      "priority": "P0",
+      "story_points": 5,
+      "sprint_scope": true,
+      "status": "completed",
+      "dependencies": ["S7"],
+      "acceptance_criteria": [
+        "首次只生成分层且明确不完整的想法草案",
+        "每轮只用一张卡处理一个最高优先级遗漏或矛盾并更新同一 case",
+        "所有关键层次确认后才出现进入问题定义的门禁"
+      ]
     }
   ]
 }

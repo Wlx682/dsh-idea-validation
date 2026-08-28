@@ -1,6 +1,96 @@
 import assert from 'node:assert/strict'
 import { apply, inject, name } from './index.js'
 
+function ideaDialogueAt(round = 1) {
+  const layers = [
+    { id: 'purpose-value', title: '目标价值', content: '减少目标偏离与无效返工', status: 'confirmed', note: '直接来自用户原始想法' },
+    { id: 'user-scenario', title: '用户场景', content: '可能由产品负责人或研发负责人发起', status: 'conflict', note: '原始描述涉及团队但未明确首要使用者' },
+    { id: 'scope-boundary', title: '范围边界', content: '先覆盖想法提出到方案形成', status: 'inferred', note: '需要后续确认是否包含开发执行' },
+    { id: 'core-mechanism', title: '关键机制', content: '逐轮发现遗漏并纠正矛盾', status: 'inferred', note: '根据用户对交互方式的要求推测' },
+    { id: 'constraints-resources', title: '约束资源', content: '', status: 'missing', note: '尚未说明试点团队与投入边界' },
+    { id: 'success-criteria', title: '成功标准', content: '', status: 'missing', note: '尚未定义何时算想法已经足够完善' },
+  ]
+  const resolve = (id, content, note) => Object.assign(layers.find(layer => layer.id === id), { content, status: 'confirmed', note })
+  if (round >= 2) resolve('user-scenario', '由研发团队负责人在需求进入开发前发起', '来自用户选择')
+  if (round >= 3) resolve('constraints-resources', '先用一个真实想法试点', '来自用户选择')
+  if (round >= 4) resolve('success-criteria', '无未解决矛盾且能进入问题验证', '来自用户选择')
+  if (round >= 5) resolve('scope-boundary', '覆盖想法提出到问题框架形成，不直接实施', '来自用户修正')
+  if (round >= 6) resolve('core-mechanism', '逐轮处理一个遗漏或矛盾', '来自用户要求')
+
+  const focuses = {
+    1: {
+      kind: 'conflict', layerId: 'user-scenario', question: '首轮工作流应该优先服务谁？',
+      context: '当前草案同时存在产品负责人和研发负责人两个发起角色，需要先确定主角色。',
+      options: [
+        { label: '研发负责人', description: '从研发团队目标与交付决策开始。' },
+        { label: '产品负责人', description: '从产品想法和需求定义开始。' },
+        { label: '想法提出者', description: '不限定岗位，任何人都能发起。' },
+      ],
+    },
+    2: {
+      kind: 'missing', layerId: 'constraints-resources', question: '第一轮试点准备控制在什么范围？',
+      context: '主角色已经明确，下一步需要确定最小投入边界。',
+      options: [
+        { label: '一个真实想法', description: '用一个 case 跑完整流程。' },
+        { label: '一个研发小组', description: '在固定团队内连续试用。' },
+      ],
+    },
+    3: {
+      kind: 'missing', layerId: 'success-criteria', question: '什么信号代表想法已经补充到可以继续？',
+      context: '角色和试点范围已经明确，但结束条件仍缺失。',
+      options: [
+        { label: '无关键矛盾', description: '关键层次不存在未解决冲突。' },
+        { label: '可形成验证问题', description: '信息足以定义下一步验证问题。' },
+      ],
+    },
+    4: {
+      kind: 'inference', layerId: 'scope-boundary', question: '这套完善流程应该停在哪个交付点？',
+      context: '缺失项已经补齐，需要确认推测的流程边界。',
+      options: [
+        { label: '问题框架', description: '完善后进入问题与假设验证。' },
+        { label: '执行计划', description: '继续生成可执行实施计划。' },
+      ],
+    },
+    5: {
+      kind: 'inference', layerId: 'core-mechanism', question: '每轮只处理一个关键点是否作为固定规则？',
+      context: '其余层次已经确认，只剩核心交互机制仍是推测。',
+      options: [
+        { label: '固定单焦点', description: '每轮只讨论一个遗漏或矛盾。' },
+        { label: '允许相关双焦点', description: '强相关问题可以同轮处理。' },
+      ],
+    },
+    6: { kind: 'none', layerId: '', question: '', context: '', options: [] },
+  }
+  const changes = [
+    '根据原始想法建立第一版分层草案。',
+    '已确认先服务研发团队负责人。',
+    '已确认先用一个真实想法试点。',
+    '已确认无关键矛盾且能形成验证问题才算补全。',
+    '已确认完善阶段停在问题框架，不直接实施。',
+    '已确认每轮固定只处理一个关键点。',
+  ]
+  return {
+    summary: round === 1 ? '团队想通过工作流减少目标偏离和返工，但使用场景与边界尚未对齐。' : '研发负责人通过单焦点对话把模糊想法补成可验证的问题框架。',
+    round,
+    lastChange: changes[round - 1],
+    layers,
+    nextFocus: focuses[round],
+    progress: { resolved: round, total: 6 },
+  }
+}
+
+function completeIdeaDialogue() {
+  return ideaDialogueAt(6)
+}
+
+function emptyIdeaDialogue() {
+  return {
+    summary: '', round: 0, lastChange: '', layers: [],
+    nextFocus: { kind: 'none', layerId: '', question: '', context: '', options: [] },
+    progress: { resolved: 0, total: 0 },
+  }
+}
+
 function payloadFor(stage) {
   const payload = {
     ideaType: 'process',
@@ -8,20 +98,10 @@ function payloadFor(stage) {
     openQuestions: [],
     clarificationQuestions: [],
     ideaExpansion: {
-      mission: '把模糊想法变成可快速删改的默认行动蓝图',
-      successMetric: '两轮选择内形成可进入方案验证的问题框架',
-      audiences: [
-        { label: '点子提出者', need: '不想填写需求表', scenario: '刚产生模糊想法时' },
-        { label: '研发负责人', need: '快速判断是否值得投入', scenario: '评审研发流程改进时' },
-        { label: '产品负责人', need: '获得可讨论的默认靶子', scenario: '需求尚未成形时' },
-      ],
-      primaryRoute: '生成六维默认草案后由用户只标记偏差',
-      alternativeRoutes: ['一键接受全部默认项', '逐维删除或修正偏移项'],
-      risks: ['脑补被误当成事实', '默认锚点误导决策', '逐项确认仍然过重'],
-      resources: { people: '1 名想法负责人', budget: '先零新增预算试点', timeline: '一个真实想法周期' },
-      deliverables: ['六维想法扩展草案', '经用户删改后的确认版本'],
-      assumptionNotice: '以下全部内容均为基于通用逻辑的待确认推测，不是用户事实或证据。',
+      mission: '', successMetric: '', audiences: [], primaryRoute: '', alternativeRoutes: [], risks: [],
+      resources: { people: '', budget: '', timeline: '' }, deliverables: [], assumptionNotice: '',
     },
+    ideaDialogue: stage === 'clarify' ? ideaDialogueAt() : completeIdeaDialogue(),
     problem: {
       actor: '', situation: '', observedPain: '', impact: '', desiredOutcome: '', constraints: [], decisionToMake: '',
     },
@@ -124,8 +204,18 @@ function payloadFor(stage) {
   return payload
 }
 
+function dialoguePayload(round) {
+  const payload = payloadFor('clarify')
+  payload.ideaDialogue = ideaDialogueAt(round)
+  payload.clarifications = Array.from({ length: round - 1 }, (_, index) => ({
+    question: `第 ${index + 1} 轮焦点`, answer: `第 ${index + 1} 轮用户答案`,
+  }))
+  return payload
+}
+
 function legacyClarifyPayload() {
   const payload = payloadFor('clarify')
+  payload.ideaDialogue = emptyIdeaDialogue()
   payload.ideaExpansion = {
     mission: '', successMetric: '', audiences: [], primaryRoute: '', alternativeRoutes: [], risks: [],
     resources: { people: '', budget: '', timeline: '' }, deliverables: [], assumptionNotice: '',
@@ -154,6 +244,27 @@ function legacyClarifyPayload() {
       ],
     },
   ]
+  return payload
+}
+
+function legacyExpansionPayload() {
+  const payload = payloadFor('clarify')
+  payload.ideaDialogue = emptyIdeaDialogue()
+  payload.ideaExpansion = {
+    mission: '把模糊想法变成可快速删改的默认行动蓝图',
+    successMetric: '两轮选择内形成可进入方案验证的问题框架',
+    audiences: [
+      { label: '点子提出者', need: '不想填写需求表', scenario: '刚产生模糊想法时' },
+      { label: '研发负责人', need: '快速判断是否值得投入', scenario: '评审研发流程改进时' },
+      { label: '产品负责人', need: '获得可讨论的默认靶子', scenario: '需求尚未成形时' },
+    ],
+    primaryRoute: '生成六维默认草案后由用户只标记偏差',
+    alternativeRoutes: ['一键接受全部默认项', '逐维删除或修正偏移项'],
+    risks: ['脑补被误当成事实', '默认锚点误导决策', '逐项确认仍然过重'],
+    resources: { people: '1 名想法负责人', budget: '先零新增预算试点', timeline: '一个真实想法周期' },
+    deliverables: ['六维想法扩展草案', '经用户删改后的确认版本'],
+    assumptionNotice: '以下全部内容均为基于通用逻辑的待确认推测，不是用户事实或证据。',
+  }
   return payload
 }
 
@@ -251,7 +362,7 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   assert.equal(started.result.stage, 'clarify')
   assert.equal(started.result.revision, 1)
   assert.equal(started.result.originalRequest, '优化需求到开发的工作流')
-  assert.deepEqual(started.result.gate.allowedDecisions, ['continue', 'revise', 'defer', 'reject'])
+  assert.deepEqual(started.result.gate.allowedDecisions, ['revise', 'defer', 'reject'])
   assert.equal(test.starts[0].maxTotalAgents, 1)
   assert.equal(test.starts[0].args.phaseTitle, 'clarify')
   assert.doesNotMatch(test.starts[0].args.prompt, /Scan broadly/)
@@ -260,44 +371,102 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   assert.equal(duplicateStart.result.caseId, started.result.caseId)
   assert.equal(test.starts.length, 1, 'identical starts must be idempotent')
 
-  test.enqueue(payloadFor('frame'))
-  const continueArgs = {
-    action: 'continue', caseId: started.result.caseId, expectedRevision: 1, decision: 'continue',
-    humanResponse: '研发团队要减少无价值需求进入开发',
-  }
-  const framed = await test.tool.execute(continueArgs, { agent: test.parent, signal: test.signal })
-  assert.equal(framed.result.stage, 'frame')
-  assert.equal(framed.result.revision, 2)
-  assert.equal(framed.result.decisionLog[0].response, continueArgs.humanResponse)
-  assert.match(test.starts[1].args.prompt, /研发团队要减少无价值需求进入开发/)
-
-  const duplicateContinue = await test.tool.execute(continueArgs, { agent: test.parent, signal: test.signal })
-  assert.equal(duplicateContinue.result.revision, 2)
-  assert.equal(test.starts.length, 2, 'identical continues must be idempotent')
-
-  await assert.rejects(
-    test.tool.execute({ ...continueArgs, decision: 'revise', humanResponse: '不同反馈' }, { agent: test.parent, signal: test.signal }),
-    /stale case revision/,
-  )
-
   const rendered = test.tool.output.render(args, started)[0].text
   assert.match(rendered, /STATE_SNAPSHOT/)
   assert.match(rendered, /CARD_HANDOFF/)
   assert.match(rendered, /ask_user_question/)
   const handoff = JSON.parse(rendered.match(/CARD_HANDOFF \(mandatory root-agent protocol\):\n([\s\S]*?)\nPass caseId/)[1])
   assert.equal(handoff.questions.length, 1)
-  assert.equal(handoff.questions[0].header, '想法扩展')
-  assert.match(handoff.questions[0].question, /待确认推测/)
-  assert.doesNotMatch(handoff.questions[0].question, /请问|具体情况/)
+  assert.equal(handoff.questions[0].header, '第1步·用户场景')
+  assert.match(handoff.questions[0].question, /当前草案/)
+  assert.match(handoff.questions[0].question, /本轮只处理/)
+  assert.doesNotMatch(handoff.questions[0].question, /全盘通过|六张/)
+  assert.equal(handoff.answerProtocol.mode, 'dialogue-step')
+  assert.equal(handoff.answerProtocol.decision, 'revise')
+  assert.equal(handoff.answerProtocol.answersBecomeHumanResponse, true)
+  assert.deepEqual(handoff.answerProtocol.progress, { resolved: 1, total: 6, round: 1 })
+  assert.match(rendered, new RegExp(started.result.caseId))
+
+  await assert.rejects(
+    test.tool.execute({
+      action: 'continue', caseId: started.result.caseId, expectedRevision: 1, decision: 'continue',
+      humanResponse: '跳过对话直接进入下一阶段',
+    }, { agent: test.parent, signal: test.signal }),
+    /idea dialogue is not complete/,
+  )
+
+  test.enqueue(dialoguePayload(2))
+  const firstAnswer = {
+    action: 'continue', caseId: started.result.caseId, expectedRevision: 1, decision: 'revise',
+    humanResponse: JSON.stringify([{ id: handoff.questions[0].id, selected: ['研发负责人'] }]),
+  }
+  const second = await test.tool.execute(firstAnswer, { agent: test.parent, signal: test.signal })
+  assert.equal(second.result.stage, 'clarify')
+  assert.equal(second.result.revision, 2)
+  assert.equal(second.result.payload.ideaDialogue.nextFocus.layerId, 'constraints-resources')
+  assert.match(test.starts[1].args.prompt, /研发负责人/)
+
+  const duplicateAnswer = await test.tool.execute(firstAnswer, { agent: test.parent, signal: test.signal })
+  assert.equal(duplicateAnswer.result.revision, 2)
+  assert.equal(test.starts.length, 2, 'an identical dialogue answer must not rerun the stage')
+
+  let completedDraft = second
+  for (let nextRound = 3; nextRound <= 6; nextRound += 1) {
+    test.enqueue(dialoguePayload(nextRound))
+    completedDraft = await test.tool.execute({
+      action: 'continue', caseId: started.result.caseId, expectedRevision: nextRound - 1, decision: 'revise',
+      humanResponse: JSON.stringify([{ id: `idea-dialogue-round-${nextRound - 1}`, selected: [`第 ${nextRound - 1} 轮答案`] }]),
+    }, { agent: test.parent, signal: test.signal })
+    assert.equal(completedDraft.result.stage, 'clarify')
+    assert.equal(completedDraft.result.revision, nextRound)
+  }
+  assert.equal(completedDraft.result.stage, 'clarify')
+  assert.equal(completedDraft.result.revision, 6)
+  const completionHandoff = JSON.parse(test.tool.output.render({}, completedDraft)[0].text.match(/CARD_HANDOFF \(mandatory root-agent protocol\):\n([\s\S]*?)\nPass caseId/)[1])
+  assert.equal(completionHandoff.answerProtocol.mode, 'dialogue-complete')
+  assert.deepEqual(completionHandoff.answerProtocol.selected.find((item) => item.label === '进入问题定义'), {
+    label: '进入问题定义', decision: 'continue', humanResponse: '分层想法草案已补全，进入问题定义。',
+  })
+
+  test.enqueue(payloadFor('frame'))
+  const continueArgs = {
+    action: 'continue', caseId: started.result.caseId, expectedRevision: 6, decision: 'continue',
+    humanResponse: '分层想法草案已补全，进入问题定义。',
+  }
+  const framed = await test.tool.execute(continueArgs, { agent: test.parent, signal: test.signal })
+  assert.equal(framed.result.stage, 'frame')
+  assert.equal(framed.result.revision, 7)
+
+  await assert.rejects(
+    test.tool.execute({ ...continueArgs, decision: 'revise', humanResponse: '不同反馈' }, { agent: test.parent, signal: test.signal }),
+    /stale case revision/,
+  )
+}
+
+{
+  const test = setup()
+  test.enqueue(payloadFor('clarify'))
+  const started = await test.tool.execute({ action: 'start', request: '保护逐轮已确认内容' }, { agent: test.parent, signal: test.signal })
+  const invalid = dialoguePayload(2)
+  invalid.ideaDialogue.layers.find(layer => layer.id === 'scope-boundary').content = '偷偷扩大到完整开发执行'
+  test.enqueue(invalid)
+  test.enqueue(dialoguePayload(2))
+  const repaired = await test.tool.execute({
+    action: 'continue', caseId: started.result.caseId, expectedRevision: 1, decision: 'revise',
+    humanResponse: JSON.stringify([{ id: 'idea-dialogue-user', selected: ['研发负责人'] }]),
+  }, { agent: test.parent, signal: test.signal })
+  assert.equal(repaired.agentsStarted, 2)
+  assert.equal(repaired.result.payload.ideaDialogue.round, 2)
+  assert.match(test.starts[2].args.prompt, /must not silently change any layer outside the current focus/)
+}
+
+{
+  const test = setup()
+  test.enqueue(legacyExpansionPayload())
+  const started = await test.tool.execute({ action: 'start', request: '兼容旧六维扩展' }, { agent: test.parent, signal: test.signal })
+  const handoff = JSON.parse(test.tool.output.render({}, started)[0].text.match(/CARD_HANDOFF \(mandatory root-agent protocol\):\n([\s\S]*?)\nPass caseId/)[1])
   assert.equal(handoff.answerProtocol.mode, 'expansion-review')
   assert.equal(handoff.answerProtocol.detailQuestions.length, 6)
-  assert.deepEqual(handoff.answerProtocol.detailQuestions.map((question) => question.header), ['核心目标', '目标用户', '执行路径', '关键风险', '所需资源', '预期交付'])
-  assert.ok(handoff.answerProtocol.detailQuestions.every((question) => question.options.some((option) => option.label === '采用此推测')))
-  assert.deepEqual(handoff.answerProtocol.selected.find((item) => item.label === '全盘通过'), { label: '全盘通过', decision: 'continue', humanResponse: '全盘通过六维想法扩展草案。' })
-  assert.equal(handoff.answerProtocol.selected.find((item) => item.label === '逐项检查').action, 'ask-detail')
-  assert.equal(handoff.answerProtocol.detailAnswerProtocol.decision, 'continue')
-  assert.equal(handoff.answerProtocol.detailAnswerProtocol.answersBecomeHumanResponse, true)
-  assert.match(rendered, new RegExp(started.result.caseId))
 }
 
 {
@@ -316,7 +485,14 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
 {
   const test = setup()
   const invalid = payloadFor('clarify')
-  invalid.ideaExpansion.risks = []
+  invalid.ideaDialogue.nextFocus = {
+    kind: 'missing', layerId: 'constraints-resources', question: '第一轮试点准备控制在什么范围？',
+    context: '尚未说明试点投入边界。',
+    options: [
+      { label: '一个真实想法', description: '用一个 case 试点。' },
+      { label: '一个研发小组', description: '在固定团队试点。' },
+    ],
+  }
   test.enqueue(invalid)
   test.enqueue(payloadFor('clarify'))
   const repaired = await test.tool.execute(
@@ -329,7 +505,7 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   assert.equal(test.starts[0].args.phaseTitle, 'clarify')
   assert.equal(test.starts[1].args.phaseTitle, 'clarify')
   assert.match(test.starts[1].args.prompt, /Repair only the clarify payload/)
-  assert.match(test.starts[1].args.prompt, /ideaExpansion\.risks/)
+  assert.match(test.starts[1].args.prompt, /resolve a conflict before/)
   assert.equal(test.disposed, 2)
 }
 
