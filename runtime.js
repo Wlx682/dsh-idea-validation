@@ -37,6 +37,29 @@ const PAYLOAD_SCHEMA = {
 			}
 		},
 		openQuestions: stringArray,
+		clarificationQuestions: {
+			type: "array",
+			items: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					id: { type: "string" },
+					header: { type: "string" },
+					question: { type: "string" },
+					options: {
+						type: "array",
+						items: {
+							type: "object",
+							additionalProperties: false,
+							properties: { label: { type: "string" }, description: { type: "string" } },
+							required: ["label", "description"]
+						}
+					},
+					multiSelect: { type: "boolean" }
+				},
+				required: ["id", "header", "question", "options", "multiSelect"]
+			}
+		},
 		problem: {
 			type: "object",
 			additionalProperties: false,
@@ -171,7 +194,7 @@ const PAYLOAD_SCHEMA = {
 		}
 	},
 	required: [
-		"ideaType", "clarifications", "openQuestions", "problem", "assumptions", "riskiestAssumption",
+		"ideaType", "clarifications", "openQuestions", "clarificationQuestions", "problem", "assumptions", "riskiestAssumption",
 		"evidencePlan", "evidence", "validationSummary", "options", "selectedOption", "experiment",
 		"criticalPath", "implementationHandoff"
 	]
@@ -246,6 +269,9 @@ function validateSchema(value, schema, path = "payload") {
 		case "integer":
 			if (!Number.isSafeInteger(value)) throw new Error(`${path} must be an integer`);
 			return;
+		case "boolean":
+			if (typeof value !== "boolean") throw new Error(`${path} must be a boolean`);
+			return;
 		case "array":
 			if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
 			if (value.length > 12) throw new Error(`${path} must contain at most 12 items`);
@@ -272,6 +298,52 @@ function nonEmpty(value, path) {
 	if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${path} must be non-empty`);
 }
 
+function migrateLegacyClarificationQuestions(payload) {
+	if (asRecord(payload) === undefined) return payload;
+	if (Object.hasOwn(payload, "clarificationQuestions")) return payload;
+	const openQuestions = Array.isArray(payload.openQuestions) ? payload.openQuestions : [];
+	return {
+		...payload,
+		clarificationQuestions: openQuestions.map((question, index) => ({
+			id: `legacy-${index + 1}`,
+			header: `澄清 ${index + 1}`,
+			question,
+			options: [
+				{ label: "暂时不确定", description: "保留为待验证假设，后续再补充。" },
+				{ label: "不适用于当前想法", description: "这个问题不影响当前想法的判断。" }
+			],
+			multiSelect: false
+		}))
+	};
+}
+
+function assertClarificationQuestions(payload, required) {
+	const questions = payload.clarificationQuestions;
+	if (required && (questions.length < 1 || questions.length > 3)) throw new Error("payload.clarificationQuestions must contain 1-3 cards");
+	if (!required && questions.length > 3) throw new Error("payload.clarificationQuestions must contain at most 3 cards");
+	const ids = new Set();
+	for (const [index, item] of questions.entries()) {
+		const path = `payload.clarificationQuestions[${index}]`;
+		for (const key of ["id", "header", "question"]) nonEmpty(item[key], `${path}.${key}`);
+		if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(item.id)) throw new Error(`${path}.id must be a stable lowercase slug`);
+		if (ids.has(item.id)) throw new Error(`${path}.id must be unique`);
+		ids.add(item.id);
+		if (item.header.length > 12) throw new Error(`${path}.header must contain at most 12 characters`);
+		if (item.question.length > 180) throw new Error(`${path}.question must contain at most 180 characters`);
+		const embedsEnumeratedChoices = /(?:^|[\s（(：:；;，,])(?:[a-d]|[1-4])[).、:：]/i.test(item.question) || /还是|\bor\b/i.test(item.question);
+		if (!item.id.startsWith("legacy-") && embedsEnumeratedChoices) throw new Error(`${path}.question must not embed enumerated choices; put them in options`);
+		if (item.options.length < 2 || item.options.length > 4) throw new Error(`${path}.options must contain 2-4 direct answers`);
+		const labels = new Set();
+		for (const [optionIndex, option] of item.options.entries()) {
+			nonEmpty(option.label, `${path}.options[${optionIndex}].label`);
+			nonEmpty(option.description, `${path}.options[${optionIndex}].description`);
+			if (option.label.length > 24) throw new Error(`${path}.options[${optionIndex}].label must contain at most 24 characters`);
+			if (labels.has(option.label)) throw new Error(`${path}.options labels must be unique`);
+			labels.add(option.label);
+		}
+	}
+}
+
 function assertWorkspaceEvidence(evidence, authorizedSources) {
 	for (const [index, item] of evidence.entries()) {
 		if (item.sourceType !== "workspace") continue;
@@ -293,12 +365,18 @@ function assertPayloadSemantics(payload, stage, authorizedSources) {
 	if (stage === "clarify") {
 		if (payload.openQuestions.length < 1 || payload.openQuestions.length > 3) throw new Error("payload.openQuestions must contain 1-3 decision-changing questions");
 		payload.openQuestions.forEach((question, index) => nonEmpty(question, `payload.openQuestions[${index}]`));
+		assertClarificationQuestions(payload, true);
+		if (payload.openQuestions.length !== payload.clarificationQuestions.length) throw new Error("payload.openQuestions and clarificationQuestions must describe the same number of questions");
+		payload.clarificationQuestions.forEach((item, index) => {
+			if (item.question !== payload.openQuestions[index]) throw new Error(`payload.clarificationQuestions[${index}].question must match openQuestions[${index}]`);
+		});
 		if (payload.evidence.some((item) => item.sourceType !== "user")) throw new Error("clarify may only preserve direct-human evidence");
 		return;
 	}
 
 	for (const key of ["actor", "situation", "observedPain", "impact", "desiredOutcome", "decisionToMake"]) nonEmpty(payload.problem[key], `payload.problem.${key}`);
 	if (payload.openQuestions.length !== 0) throw new Error("payload.openQuestions must be empty after clarification");
+	assertClarificationQuestions(payload, false);
 	if (payload.assumptions.length < 1 || payload.assumptions.length > 5) throw new Error("payload.assumptions must contain 1-5 items");
 	nonEmpty(payload.riskiestAssumption, "payload.riskiestAssumption");
 
@@ -341,7 +419,7 @@ function assertPayloadSemantics(payload, stage, authorizedSources) {
 }
 
 function readPayload(value, stage, authorizedSources) {
-	const payload = trimStrings(value);
+	const payload = trimStrings(migrateLegacyClarificationQuestions(structuredClone(value)));
 	validateSchema(payload, PAYLOAD_SCHEMA);
 	assertPayloadSemantics(payload, stage, authorizedSources);
 	return payload;
@@ -356,7 +434,7 @@ function allowedDecisions(stage) {
 
 function gateFor(stage, payload) {
 	let prompt = "";
-	if (stage === "clarify") prompt = payload.openQuestions.map((question, index) => `${index + 1}. ${question}`).join("\n");
+	if (stage === "clarify") prompt = `请逐项回答以下 ${payload.clarificationQuestions.length} 个澄清问题。`;
 	if (stage === "frame") prompt = `请确认这个问题定义和最高风险假设是否准确：${payload.riskiestAssumption}`;
 	if (stage === "evidence-plan") prompt = `是否批准只围绕这个问题取证：${payload.evidencePlan.question}`;
 	if (stage === "evidence-result") prompt = `证据结论为 ${payload.validationSummary.outcome}。请选择继续比较方案、调整问题、暂缓或拒绝。`;
@@ -386,17 +464,30 @@ function gateCardHandoff(state) {
 		experiment: "最小实验",
 		implementation: "实施交接"
 	};
-	let mappings;
-	let customDecision = "revise";
 	if (state.stage === "clarify") {
-		mappings = [
-			mappedCardOption("按现有信息继续", "continue", "把尚未确认的内容保留为假设，进入问题定义。", "按现有信息继续；未确认内容保留为假设。"),
-			mappedCardOption("重新澄清", "revise", "换一种问法，仍停留在澄清阶段。", "请重新组织澄清问题。"),
-			mappedCardOption("暂缓", "defer", "保留当前 case，暂不继续。"),
-			mappedCardOption("放弃", "reject", "结束当前想法验证 case。")
-		];
-		customDecision = "continue";
-	} else if (state.stage === "options") {
+		return {
+			tool: "ask_user_question",
+			questions: state.payload.clarificationQuestions.map((item) => ({
+				id: `idea-clarify-${state.caseId}-${state.revision}-${item.id}`,
+				header: item.header,
+				question: item.question,
+				options: item.options,
+				multi_select: item.multiSelect
+			})),
+			answerProtocol: {
+				mode: "clarification-batch",
+				caseId: state.caseId,
+				expectedRevision: state.revision,
+				decision: "continue",
+				answersBecomeHumanResponse: true,
+				humanResponseFormat: "JSON array preserving every question id, selected labels, and custom answer",
+				skipped: "wait"
+			}
+		};
+	}
+	let mappings;
+	const customDecision = "revise";
+	if (state.stage === "options") {
 		mappings = [
 			...state.payload.options.map((option) => mappedCardOption(`选择：${option.name}`, "approve", `${option.expectedValue}；投入：${option.effort}；风险：${option.risk}`, option.name)),
 			mappedCardOption("修改这些方案", "revise", "保留问题与证据，重新生成方案。", "请根据用户反馈修改候选方案。"),
@@ -461,8 +552,8 @@ function nextStage(stage, decision) {
 
 function stageInstructions(stage) {
 	return {
-		clarify: "Do not search the web or workspace. Ask 1-3 questions whose answers can change actor, problem, scope, or whether to continue. Preserve only direct-human observations. Fill all downstream fields with empty strings or arrays.",
-		frame: "Do not use tools. Incorporate the latest human response into clarifications. Separate observed pain from proposed solutions. Define the outcome and decision, list 1-5 falsifiable assumptions, select exactly one riskiest assumption, and leave openQuestions empty.",
+		clarify: "Do not search the web or workspace. Produce 1-3 clarification cards whose answers can change actor, problem, scope, or whether to continue. One card asks exactly one decision variable. Put choices only in clarificationQuestions[].options: never embed a), b), c) or multiple pseudo-options in the question text. Give each card 2-4 short, mutually exclusive direct answers and keep custom input possible. Copy each question text into openQuestions in the same order. Preserve only direct-human observations. Fill all downstream fields with empty strings or arrays.",
+		frame: "Do not use tools. Incorporate every item from the latest batched human response into clarifications. Preserve clarificationQuestions exactly as history. Separate observed pain from proposed solutions. Define the outcome and decision, list 1-5 falsifiable assumptions, select exactly one riskiest assumption, and leave openQuestions empty.",
 		"evidence-plan": "Do not collect evidence yet. Design one bounded plan for the riskiest assumption. Name 1-5 specific sources or methods, plus pass and fail signals. Do not broaden into general industry research.",
 		"evidence-result": "Execute only the approved evidence plan. Web evidence is background, never proof about the user's organization. Workspace evidence may use only authorizedSources. Record 1-8 narrow claims with source type, locator, verification, direction, and relevance. State uncertainty honestly.",
 		options: "Do not search. Produce 2-3 materially different interventions. Compare value, effort, risk, reversibility, and required authority. Do not select for the human.",
@@ -725,7 +816,7 @@ function apply(ctx, config) {
 	ctx.systemPrompt.section({
 		name: "tool:idea-validation",
 		order: 117,
-		text: "Use idea_validation only from the root agent when the direct human asks to clarify, validate, assess feasibility, find the critical path for, or progressively land an incomplete idea. A workflow child or delegated subagent must never call idea_validation or ask_user_question and must instead complete its assigned structured-output stage. Start once with action=start; do not perform a parallel discovery pass first. Every nonterminal result includes a mandatory CARD_HANDOFF. As the root agent, call ask_user_question exactly once with CARD_HANDOFF.questions as the next tool call; do not replace the card with a prose question or a final answer. When ask_user_question returns, map the selected label or custom text exactly through CARD_HANDOFF.answerProtocol, then immediately call idea_validation with action=continue, the same caseId, expectedRevision, mapped decision, and mapped or custom humanResponse. If the answer is skipped, wait instead of advancing. Never invent approval or restart a case after a stage error: the tool repairs only the failing stage and rejects stale revisions. Workspace evidence requires explicit authorizedSources. A complete case is an implementation-ready handoff, not proof that implementation ran; actual code or external execution requires a later explicit request in a write-capable mode."
+		text: "Use idea_validation only from the root agent when the direct human asks to clarify, validate, assess feasibility, find the critical path for, or progressively land an incomplete idea. A workflow child or delegated subagent must never call idea_validation or ask_user_question and must instead complete its assigned structured-output stage. Start once with action=start; do not perform a parallel discovery pass first. Every nonterminal result includes a mandatory CARD_HANDOFF. As the root agent, call ask_user_question exactly once with CARD_HANDOFF.questions as the next tool call; do not replace the cards with a prose question or a final answer. When answerProtocol.mode is clarification-batch, preserve every returned question id, selected labels, and custom text as one JSON humanResponse, use its fixed continue decision, and call idea_validation exactly once. For other modes, map the selected label or custom text exactly through CARD_HANDOFF.answerProtocol. Always continue with the same caseId and expectedRevision. If any answer is skipped, wait instead of advancing. Never invent approval or restart a case after a stage error: the tool repairs only the failing stage and rejects stale revisions. Workspace evidence requires explicit authorizedSources. A complete case is an implementation-ready handoff, not proof that implementation ran; actual code or external execution requires a later explicit request in a write-capable mode."
 	});
 	ctx.tools.register({
 		name: "idea_validation",

@@ -75,6 +75,21 @@
         "卡片选择和自定义回答有确定的 decision 映射",
         "回答后使用同一 caseId 和 expectedRevision 自动推进且子 Agent 不能提问"
       ]
+    },
+    {
+      "id": "S6",
+      "title": "一事一卡的结构化澄清",
+      "vertical_slice": true,
+      "priority": "P0",
+      "story_points": 3,
+      "sprint_scope": true,
+      "status": "completed",
+      "dependencies": ["S5"],
+      "acceptance_criteria": [
+        "三个待确认事项必须生成三张独立卡片",
+        "每张卡的问题正文只问一件事且选项能直接回答该问题",
+        "整组答案聚合为一次 humanResponse 并只继续同一 case 一次"
+      ]
     }
   ]
 }

@@ -5,7 +5,37 @@ function payloadFor(stage) {
   const payload = {
     ideaType: 'process',
     clarifications: [],
-    openQuestions: ['你要改变的具体决策是什么？'],
+    openQuestions: [
+      '你希望以什么形态落地？',
+      '首个试点选择哪条业务流程？',
+      '优先用什么指标判断成功？',
+    ],
+    clarificationQuestions: [
+      {
+        id: 'landing-shape', header: '落地形态', question: '你希望以什么形态落地？', multiSelect: false,
+        options: [
+          { label: '个人方法论', description: '先形成一个人可重复使用的方法。' },
+          { label: '团队工作流', description: '直接形成团队共同执行的流程。' },
+          { label: '个人试点后推广', description: '先小范围验证，再推广给团队。' },
+        ],
+      },
+      {
+        id: 'first-pilot', header: '首个试点', question: '首个试点选择哪条业务流程？', multiSelect: false,
+        options: [
+          { label: '需求到发布', description: '验证完整的需求交付链路。' },
+          { label: '团队协作', description: '先验证角色之间的协作流程。' },
+          { label: 'CI 与质量', description: '先验证自动化与质量门禁。' },
+        ],
+      },
+      {
+        id: 'success-metric', header: '成功指标', question: '优先用什么指标判断成功？', multiSelect: false,
+        options: [
+          { label: '返工率', description: '观察实现后返工是否减少。' },
+          { label: '交付周期', description: '观察从需求到交付是否缩短。' },
+          { label: '需求变更次数', description: '观察开发后的需求偏移是否减少。' },
+        ],
+      },
+    ],
     problem: {
       actor: '', situation: '', observedPain: '', impact: '', desiredOutcome: '', constraints: [], decisionToMake: '',
     },
@@ -235,9 +265,15 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   assert.match(rendered, /STATE_SNAPSHOT/)
   assert.match(rendered, /CARD_HANDOFF/)
   assert.match(rendered, /ask_user_question/)
-  assert.match(rendered, /按现有信息继续/)
-  assert.match(rendered, /"decision": "continue"/)
-  assert.match(rendered, /"customDecision": "continue"/)
+  const handoff = JSON.parse(rendered.match(/CARD_HANDOFF \(mandatory root-agent protocol\):\n([\s\S]*?)\nPass caseId/)[1])
+  assert.equal(handoff.questions.length, 3)
+  assert.deepEqual(handoff.questions.map((question) => question.header), ['落地形态', '首个试点', '成功指标'])
+  assert.ok(handoff.questions.every((question) => question.options.length === 3))
+  assert.ok(handoff.questions.every((question) => !/[a-c][).、]/i.test(question.question)))
+  assert.ok(handoff.questions.every((question) => !question.options.some((option) => ['按现有信息继续', '重新澄清', '暂缓', '放弃'].includes(option.label))))
+  assert.equal(handoff.answerProtocol.mode, 'clarification-batch')
+  assert.equal(handoff.answerProtocol.decision, 'continue')
+  assert.equal(handoff.answerProtocol.answersBecomeHumanResponse, true)
   assert.match(rendered, new RegExp(started.result.caseId))
 }
 
@@ -272,6 +308,23 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   assert.match(test.starts[1].args.prompt, /Repair only the clarify payload/)
   assert.match(test.starts[1].args.prompt, /openQuestions/)
   assert.equal(test.disposed, 2)
+}
+
+{
+  const test = setup()
+  const embeddedChoices = payloadFor('clarify')
+  embeddedChoices.openQuestions[0] = '你希望以什么形态落地：a) 个人方法论 b) 团队工作流 c) 团队推广？'
+  embeddedChoices.clarificationQuestions[0].question = embeddedChoices.openQuestions[0]
+  test.enqueue(embeddedChoices)
+  test.enqueue(payloadFor('clarify'))
+  const repaired = await test.tool.execute(
+    { action: 'start', request: '拒绝把三个选项塞进一个问题' },
+    { agent: test.parent, signal: test.signal },
+  )
+  assert.equal(repaired.agentsStarted, 2)
+  assert.match(test.starts[1].args.prompt, /must not embed enumerated choices/)
+  const handoff = JSON.parse(test.tool.output.render({}, repaired)[0].text.match(/CARD_HANDOFF \(mandatory root-agent protocol\):\n([\s\S]*?)\nPass caseId/)[1])
+  assert.equal(handoff.questions.length, 3)
 }
 
 {
