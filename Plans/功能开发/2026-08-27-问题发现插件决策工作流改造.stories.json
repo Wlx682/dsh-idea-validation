@@ -60,6 +60,21 @@
         "重复请求幂等且陈旧 revision 被拒绝",
         "专项回归覆盖本次真实失败模式"
       ]
+    },
+    {
+      "id": "S5",
+      "title": "卡片式人工门禁",
+      "vertical_slice": true,
+      "priority": "P0",
+      "story_points": 3,
+      "sprint_scope": true,
+      "status": "completed",
+      "dependencies": ["S4"],
+      "acceptance_criteria": [
+        "每个非终态阶段都通过 ask_user_question 显示选择卡片",
+        "卡片选择和自定义回答有确定的 decision 映射",
+        "回答后使用同一 caseId 和 expectedRevision 自动推进且子 Agent 不能提问"
+      ]
     }
   ]
 }

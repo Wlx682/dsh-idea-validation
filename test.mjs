@@ -180,6 +180,8 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
 {
   const test = setup()
   assert.match(test.promptSection.text, /same caseId/)
+  assert.match(test.promptSection.text, /ask_user_question/)
+  assert.match(test.promptSection.text, /CARD_HANDOFF/)
   assert.equal(test.tool.name, 'idea_validation')
   assert.deepEqual([...test.commands.keys()].sort(), ['idea-workflow', 'problem-discovery'])
   const steered = []
@@ -188,6 +190,7 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
   })
   assert.deepEqual(commandResult, { kind: 'success', text: 'Idea workflow started.' })
   assert.match(steered[0].content[0].text, /Do not research or draft a parallel brief/)
+  assert.match(steered[0].content[0].text, /ask_user_question/)
   assert.match(steered[0].content[0].text, /验证一个研发流程想法/)
 }
 
@@ -230,7 +233,25 @@ assert.deepEqual(inject, ['tools', 'workflowEngine', 'systemPrompt'])
 
   const rendered = test.tool.output.render(args, started)[0].text
   assert.match(rendered, /STATE_SNAPSHOT/)
+  assert.match(rendered, /CARD_HANDOFF/)
+  assert.match(rendered, /ask_user_question/)
+  assert.match(rendered, /按现有信息继续/)
+  assert.match(rendered, /"decision": "continue"/)
+  assert.match(rendered, /"customDecision": "continue"/)
   assert.match(rendered, new RegExp(started.result.caseId))
+}
+
+{
+  const test = setup()
+  test.enqueue(payloadFor('options'))
+  const options = await test.tool.execute({
+    action: 'continue', state: stateFor('evidence-result'), expectedRevision: 1, decision: 'approve',
+  }, { agent: test.parent, signal: test.signal })
+  const rendered = test.tool.output.render({}, options)[0].text
+  assert.match(rendered, /轻量价值门禁/)
+  assert.match(rendered, /完整流程重构/)
+  assert.match(rendered, /"decision": "approve"/)
+  assert.match(rendered, /"customDecision": "revise"/)
 }
 
 {

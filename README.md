@@ -6,7 +6,7 @@
 澄清 → 问题确认 → 取证计划 → 证据结论 → 方案比较 → 最小实验 → 实施交接
 ```
 
-每次 `idea_validation` 调用只推进一个阶段，返回 `caseId`、`revision`、完整状态快照和当前唯一门禁。用户未确认时不会自动进入下一阶段；格式错误只修复当前阶段，不会重跑已经完成的工作。
+每次 `idea_validation` 调用只推进一个阶段，返回 `caseId`、`revision`、完整状态快照和当前唯一门禁。非终态门禁通过 `ask_user_question` 显示为选择卡片；用户点击或填写自定义答案后，根 Agent 会把真实答案映射到同一个 case 的下一次调用。用户未确认时不会自动进入下一阶段；格式错误只修复当前阶段，不会重跑已经完成的工作。
 
 ## 它解决什么问题
 
@@ -31,6 +31,8 @@
 | `complete` | 实施就绪交接 | 在可写模式中显式开始执行 |
 
 `approve` 只代表用户批准当前门禁，不代表实施已经发生。
+
+卡片交互由根 Agent 负责。工作流子 Agent 即使继承同一个 preset，也会被运行时拒绝调用人类提问工具，因此不会在后台子任务中弹出卡片或永久等待。
 
 ## 使用
 
@@ -86,7 +88,7 @@ mkdir -p ~/.dsh/.agent-presets/idea-validation
 cp preset/agent.cordis.yml preset/preset.yml ~/.dsh/.agent-presets/idea-validation/
 ```
 
-重启 DSH Web 后选择“想法验证模式”。preset 默认只提供 Web 搜索和状态工作流，不提供 shell、文件修改、Goal 或通用委派；也不再暴露全仓库搜索，以避免无关文件污染问题证据。
+重启 DSH Web 后选择“想法验证模式”。preset 默认只提供卡片提问、Web 搜索和状态工作流，不提供 shell、文件修改、Goal 或通用委派；也不再暴露全仓库搜索，以避免无关文件污染问题证据。
 
 preset 使用稳定子入口 `dsh-idea-validation/workflow`。从旧版原地升级且暂时不能重启长驻 DSH 进程时，也可把已安装 preset 的该行临时改为 `../../profiles/web/node_modules/dsh-idea-validation/runtime.js`，用新的模块文件完成热迁移；正式部署仍建议在方便时重启一次 Web 服务。
 
@@ -99,7 +101,7 @@ npm run test:dedicated
 npm test
 ```
 
-专项回归固定验证：阶段级修复、单 Agent 阶段预算、重复启动幂等、无默认工作区广扫。完整测试另外覆盖跨轮状态、revision 乐观锁、证据授权、实验、实施交接和终态。
+专项回归固定验证：阶段级修复、单 Agent 阶段预算、重复启动幂等、卡片工具装配、无默认工作区广扫。完整测试另外覆盖跨轮状态、revision 乐观锁、卡片答案协议、证据授权、实验、实施交接和终态。
 
 ## 设计边界
 

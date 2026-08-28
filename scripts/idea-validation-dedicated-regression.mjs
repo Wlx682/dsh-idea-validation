@@ -11,6 +11,8 @@ assert.match(source, /outside authorizedSources/)
 assert.match(source, /stale case revision/)
 assert.match(source, /cannot be called from a workflow child or delegated subagent/)
 assert.doesNotMatch(preset, /dsh-tool-fs-search/)
+assert.match(preset, /@deepseek-ai\/dsh-tool-ask-user/)
+assert.match(preset, /ask_user_question/)
 assert.match(preset, /mode: native/)
 
 const empty = {
